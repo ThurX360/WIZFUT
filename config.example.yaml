@@ -18,3 +18,9 @@ spike_pct: 0.20          # Alta >= 20% sinaliza spike
 # Alertas
 cooldown_minutes: 15     # Não repetir o mesmo alerta do mesmo jogador antes desse tempo
 notify_discord: true
+
+# Histórico interno (preenche média/desvio quando faltarem no CSV/scraper)
+history:
+  window_minutes: 1440   # janela de análise em minutos (padrão 24h)
+  max_points: 400        # máximo de pontos por jogador mantidos em memória
+  min_points: 3          # mínimo de pontos para usar as métricas calculadas

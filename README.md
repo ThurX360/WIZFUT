@@ -8,6 +8,7 @@
 > - **Possível snipe/underpriced** (preço menor que a média histórica)
 > - **Possível fake BIN** (queda brusca sem confirmação de volume)
 > - **Spike de preço** (movimento forte que pode indicar flip)
+> - **Falhas de dados** preenchendo média e desvio automaticamente via histórico local
 
 Ele roda em loop 24/7 (enquanto o processo estiver ativo) e **envia alertas para um Webhook do Discord**.
 
@@ -30,6 +31,7 @@ Ele roda em loop 24/7 (enquanto o processo estiver ativo) e **envia alertas para
 4) **Configuração**
    - Copie `config.example.yaml` para `config.yaml` e ajuste caminhos/limiares.
    - Copie `.env.example` para `.env` e cole sua `DISCORD_WEBHOOK_URL`.
+   - Ajuste (se quiser) o bloco `history` para definir janela máxima, pontos e mínimo de amostras.
 
 5) **Instalar dependências**
 ```bash
@@ -63,6 +65,11 @@ player_id,name,rating,league,position,price,avg_price_24h,std_24h,updated_at
 - **Spike:** `price >= avg_24h * (1 + SPIKE_PCT)`
 
 Você pode editar limiares no `config.yaml`.
+
+### Histórico inteligente
+- Mantemos um **buffer circular em memória** com até 400 amostras recentes por jogador (configurável).
+- Quando `avg_price_24h` ou `std_24h` não vêm do feeder/scraper, eles são recalculados antes da análise.
+- Os alertas mostram quantas amostras sustentaram o cálculo (`Hist.: X pts`) para facilitar a confiança.
 
 ---
 
