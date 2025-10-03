@@ -45,6 +45,11 @@ O bot vai realizar scraping periódico do Futwiz e enviar alertas quando detecta
 - `platform`: `ps` | `xbox` | `pc`
 - `pages`: quantas páginas do grid do Futwiz serão varridas por rodada
 - `delay_between_pages`: pausa (segundos) entre cada requisição para evitar bloqueios
+- `delay_jitter`: ruído aleatório aplicado ao delay para humanizar o tráfego
+- `timeout`: tempo limite (segundos) para cada request antes de abortar
+- `max_retries` + `backoff_factor`: tentativas automáticas com backoff exponencial para erros HTTP/429
+- `extra_headers`: cabeçalhos HTTP extras (ex.: `Accept-Language`) aplicados em todas as requisições
+- `proxies`: proxies HTTP/S caso precise distribuir o scraping em outra rota
 
 ### Detectores
 - **Underpriced/Snipe:** `price <= avg_24h * (1 - min_discount)` **e** `zscore <= -zscore_min`

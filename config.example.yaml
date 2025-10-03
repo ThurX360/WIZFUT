@@ -3,6 +3,12 @@ futwiz:
   platform: ps                               # ps | xbox | pc
   pages: 1                                   # número de páginas do grid para scrapear
   delay_between_pages: 1.0                   # pausa entre requisições em segundos
+  delay_jitter: 0.3                          # variação aleatória (0.3 -> +/-0.3s)
+  timeout: 15                                # timeout da requisição HTTP em segundos
+  max_retries: 3                             # tentativas em caso de erro/transient block
+  backoff_factor: 0.6                        # fator exponencial entre tentativas
+  extra_headers: {}                          # cabeçalhos extras (ex.: Accept-Language)
+  proxies: {}                                # proxies HTTP/S se precisar rotear tráfego
 
 poll_interval_secs: 20                       # Freq. que verificamos/refresh
 

@@ -1,15 +1,20 @@
 """Lightweight HTML scraper for Futwiz player price tables."""
 from __future__ import annotations
 
+import logging
+import random
 import re
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional, Tuple
 
 import requests
 from bs4 import BeautifulSoup
 from bs4.element import Tag
+from requests.adapters import HTTPAdapter
+from requests.exceptions import RequestException
+from urllib3.util.retry import Retry
 
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -18,6 +23,12 @@ _USER_AGENT = (
 )
 
 _PRICE_RE = re.compile(r"([0-9]+(?:[.,][0-9]+)?)([kmbKMB]?)")
+_RELATIVE_TIME_RE = re.compile(
+    r"(?P<value>\d+)\s*(?P<unit>second|minute|hour|day|week)s?\s*ago",
+    re.IGNORECASE,
+)
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -25,6 +36,13 @@ class FutwizScraperConfig:
     platform: str = "ps"
     pages: int = 1
     delay_between_pages: float = 1.0
+    delay_jitter: float = 0.0
+    timeout: float = 15.0
+    max_retries: int = 3
+    backoff_factor: float = 0.5
+    retry_statuses: Tuple[int, ...] = (429, 500, 502, 503, 504)
+    extra_headers: Optional[Dict[str, str]] = None
+    proxies: Optional[Dict[str, str]] = None
 
 
 class FutwizScraper:
@@ -65,6 +83,25 @@ class FutwizScraper:
             if key:
                 colmap[key] = td.get_text(" ", strip=True)
 
+        data_price_value: Optional[int] = None
+        for td in cells:
+            if data_price_value is not None:
+                break
+            direct_attr = td.get("data-price")
+            platform_attr = td.get(f"data-price-{platform}")
+            raw_value = platform_attr or direct_attr
+            if raw_value:
+                data_price_value = self._parse_coin(raw_value)
+
+        data_avg_value: Optional[int] = None
+        for td in cells:
+            if data_avg_value is not None:
+                break
+            direct_attr = td.get("data-average") or td.get("data-avg")
+            raw_value = direct_attr
+            if raw_value:
+                data_avg_value = self._parse_coin(raw_value)
+
         texts = [td.get_text(" ", strip=True) for td in cells]
 
         rating = colmap.get("rating") or (texts[0] if texts else None)
@@ -98,8 +135,8 @@ class FutwizScraper:
         except (TypeError, ValueError):
             rating_value = None
 
-        price_value = self._parse_coin(price_text) if price_text else None
-        avg_value = self._parse_coin(avg_text) if avg_text else None
+        price_value = data_price_value or (self._parse_coin(price_text) if price_text else None)
+        avg_value = data_avg_value or (self._parse_coin(avg_text) if avg_text else None)
 
         if not player_id and name:
             player_id = name.lower().replace(" ", "-")
@@ -107,9 +144,7 @@ class FutwizScraper:
         if not player_id or not name or not price_value:
             return None
 
-        updated_at = datetime.now(timezone.utc)
-        if updated:
-            updated_at = datetime.now(timezone.utc)
+        updated_at = self._parse_updated(updated)
 
         return {
             "player_id": player_id,
@@ -133,23 +168,83 @@ class FutwizScraper:
                 rows.append(data)
         return rows
 
-    def fetch_page(self, page: int, platform: str) -> str:
+    def _configure_session(self, cfg: FutwizScraperConfig) -> None:
+        retry = Retry(
+            total=cfg.max_retries,
+            backoff_factor=cfg.backoff_factor,
+            status_forcelist=cfg.retry_statuses,
+            allowed_methods=frozenset(["HEAD", "GET", "OPTIONS"]),
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
+
+        if cfg.extra_headers:
+            self.session.headers.update(cfg.extra_headers)
+        if cfg.proxies:
+            self.session.proxies.update(cfg.proxies)
+
+    def _parse_updated(self, text: Optional[str]) -> datetime:
+        if not text:
+            return datetime.now(timezone.utc)
+
+        normalized = text.strip().lower()
+        if normalized in {"just now", "now", "-"}:
+            return datetime.now(timezone.utc)
+
+        match = _RELATIVE_TIME_RE.search(normalized)
+        if match:
+            value = int(match.group("value"))
+            unit = match.group("unit").lower()
+            delta_kwargs = {
+                "second": "seconds",
+                "minute": "minutes",
+                "hour": "hours",
+                "day": "days",
+                "week": "weeks",
+            }
+            key = delta_kwargs.get(unit, "minutes")
+            delta = timedelta(**{key: value})
+            return datetime.now(timezone.utc) - delta
+
+        for fmt in ("%d/%m/%Y %H:%M", "%Y-%m-%d %H:%M", "%H:%M"):
+            try:
+                parsed = datetime.strptime(text.strip(), fmt)
+            except ValueError:
+                continue
+            else:
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                return parsed
+
+        return datetime.now(timezone.utc)
+
+    def fetch_page(self, page: int, platform: str, timeout: float) -> str:
         response = self.session.get(
             self.BASE_URL,
             params={"page": page, "platform": platform},
-            timeout=15,
+            timeout=timeout,
         )
         response.raise_for_status()
         return response.text
 
     def fetch_market(self, cfg: FutwizScraperConfig) -> List[Dict[str, object]]:
+        self._configure_session(cfg)
         all_rows: List[Dict[str, object]] = []
         for page in range(1, cfg.pages + 1):
-            html = self.fetch_page(page, cfg.platform)
+            try:
+                html = self.fetch_page(page, cfg.platform, cfg.timeout)
+            except RequestException as exc:
+                log.warning("Falha ao baixar página %s (%s): %s", page, cfg.platform, exc)
+                break
             rows = self._parse_page(html, cfg.platform)
             if not rows:
                 break
             all_rows.extend(rows)
-            if cfg.delay_between_pages:
-                time.sleep(cfg.delay_between_pages)
+            if cfg.delay_between_pages or cfg.delay_jitter:
+                base_delay = max(cfg.delay_between_pages, 0.0)
+                jitter = random.uniform(-cfg.delay_jitter, cfg.delay_jitter) if cfg.delay_jitter else 0.0
+                delay = max(0.0, base_delay + jitter)
+                if delay:
+                    time.sleep(delay)
         return all_rows

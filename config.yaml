@@ -2,6 +2,12 @@ futwiz:
   platform: ps
   pages: 1
   delay_between_pages: 1.0
+  delay_jitter: 0.3
+  timeout: 15
+  max_retries: 3
+  backoff_factor: 0.6
+  extra_headers: {}
+  proxies: {}
 
 poll_interval_secs: 5
 min_discount: 0.12

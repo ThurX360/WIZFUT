@@ -28,6 +28,12 @@ class Config:
     futwiz_platform: str
     futwiz_pages: int
     futwiz_delay_between_pages: float
+    futwiz_delay_jitter: float
+    futwiz_timeout: float
+    futwiz_max_retries: int
+    futwiz_backoff_factor: float
+    futwiz_extra_headers: Dict[str, str]
+    futwiz_proxies: Dict[str, str]
     history_window_minutes: int
     history_max_points: int
     history_min_points: int
@@ -52,6 +58,12 @@ def load_config() -> Config:
         futwiz_platform=str(futwiz_cfg.get("platform", "ps")),
         futwiz_pages=int(futwiz_cfg.get("pages", 1)),
         futwiz_delay_between_pages=float(futwiz_cfg.get("delay_between_pages", 1.0)),
+        futwiz_delay_jitter=float(futwiz_cfg.get("delay_jitter", 0.0)),
+        futwiz_timeout=float(futwiz_cfg.get("timeout", 15.0)),
+        futwiz_max_retries=int(futwiz_cfg.get("max_retries", 3)),
+        futwiz_backoff_factor=float(futwiz_cfg.get("backoff_factor", 0.5)),
+        futwiz_extra_headers=dict(futwiz_cfg.get("extra_headers", {}) or {}),
+        futwiz_proxies=dict(futwiz_cfg.get("proxies", {}) or {}),
         history_window_minutes=max(1, int(history_cfg.get("window_minutes", 60 * 24))),
         history_max_points=max(10, int(history_cfg.get("max_points", 400))),
         history_min_points=max(1, int(history_cfg.get("min_points", 3))),
@@ -161,6 +173,12 @@ def run():
         platform=cfg.futwiz_platform,
         pages=cfg.futwiz_pages,
         delay_between_pages=cfg.futwiz_delay_between_pages,
+        delay_jitter=cfg.futwiz_delay_jitter,
+        timeout=cfg.futwiz_timeout,
+        max_retries=cfg.futwiz_max_retries,
+        backoff_factor=cfg.futwiz_backoff_factor,
+        extra_headers=cfg.futwiz_extra_headers,
+        proxies=cfg.futwiz_proxies,
     )
 
     while True:
