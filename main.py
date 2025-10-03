@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 import os, time, yaml
 from dataclasses import dataclass
@@ -6,7 +5,6 @@ from typing import Dict, Any, Optional
 from dotenv import load_dotenv
 
 from utils.logging_setup import setup_logger
-from sources.futbin_csv import read_rows
 from sources.futwiz_scraper import FutwizScraper, FutwizScraperConfig
 from detectors.underpriced import detect_underpriced, UnderpricedConfig
 from detectors.fake_bin import detect_fake_bin, FakeBinConfig
@@ -20,8 +18,6 @@ log = setup_logger()
 
 @dataclass
 class Config:
-    source: str
-    data_path: str
     poll_interval_secs: int
     min_discount: float
     zscore_min: float
@@ -46,8 +42,6 @@ def load_config() -> Config:
     futwiz_cfg = y.get("futwiz", {}) or {}
     history_cfg = y.get("history", {}) or {}
     return Config(
-        source=str(y.get("source", "csv")).lower(),
-        data_path=y.get("data_path","./data/futbin_export.csv"),
         poll_interval_secs=int(y.get("poll_interval_secs", 20)),
         min_discount=float(y.get("min_discount", 0.12)),
         zscore_min=float(y.get("zscore_min", 1.8)),
@@ -151,60 +145,34 @@ def run():
         cfg.history_max_points,
         cfg.history_min_points,
     )
-    if cfg.source == "csv":
-        log.info(
-            f"Lendo CSV: {cfg.data_path} | intervalo: {cfg.poll_interval_secs}s"
-        )
-    elif cfg.source == "futwiz":
-        log.info(
-            "Scraping Futwiz | plataforma: %s | páginas: %s",
-            cfg.futwiz_platform,
-            cfg.futwiz_pages,
-        )
-        log.info("Intervalo de pooling: %ss", cfg.poll_interval_secs)
-    else:
-        raise ValueError(f"Fonte desconhecida: {cfg.source}")
+    log.info(
+        "Scraping Futwiz | plataforma: %s | páginas: %s",
+        cfg.futwiz_platform,
+        cfg.futwiz_pages,
+    )
+    log.info("Intervalo de pooling: %ss", cfg.poll_interval_secs)
     ucfg = UnderpricedConfig(cfg.min_discount, cfg.zscore_min)
     fcfg = FakeBinConfig(cfg.fake_drop_pct)
     scfg = SpikeConfig(cfg.spike_pct)
     cooldown = cfg.cooldown_minutes * 60
 
-    last_mtime = 0.0
-    scraper: FutwizScraper | None = None
-    scraper_cfg: FutwizScraperConfig | None = None
-    if cfg.source == "futwiz":
-        scraper = FutwizScraper()
-        scraper_cfg = FutwizScraperConfig(
-            platform=cfg.futwiz_platform,
-            pages=cfg.futwiz_pages,
-            delay_between_pages=cfg.futwiz_delay_between_pages,
-        )
+    scraper = FutwizScraper()
+    scraper_cfg = FutwizScraperConfig(
+        platform=cfg.futwiz_platform,
+        pages=cfg.futwiz_pages,
+        delay_between_pages=cfg.futwiz_delay_between_pages,
+    )
 
     while True:
         try:
-            if cfg.source == "csv":
-                if not os.path.exists(cfg.data_path):
-                    log.warning(f"Arquivo não encontrado: {cfg.data_path}")
-                    time.sleep(cfg.poll_interval_secs)
-                    continue
-
-                mtime = os.path.getmtime(cfg.data_path)
-                if mtime <= last_mtime:
-                    time.sleep(cfg.poll_interval_secs)
-                    continue
-                last_mtime = mtime
-
-                rows = read_rows(cfg.data_path)
-                log.info(f"{len(rows)} linhas lidas. Rodando detectores...")
-            else:
-                rows = scraper.fetch_market(scraper_cfg) if scraper and scraper_cfg else []
-                if not rows:
-                    log.warning("Scraper Futwiz não retornou dados")
-                    time.sleep(cfg.poll_interval_secs)
-                    continue
-                log.info(
-                    f"{len(rows)} itens recebidos da Futwiz. Rodando detectores..."
-                )
+            rows = scraper.fetch_market(scraper_cfg)
+            if not rows:
+                log.warning("Scraper Futwiz não retornou dados")
+                time.sleep(cfg.poll_interval_secs)
+                continue
+            log.info(
+                f"{len(rows)} itens recebidos da Futwiz. Rodando detectores..."
+            )
 
             for row in rows:
                 pid = str(row.get("player_id") or row.get("name"))
