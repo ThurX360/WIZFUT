@@ -14,3 +14,8 @@ fake_drop_pct: 0.40
 spike_pct: 0.20
 cooldown_minutes: 0
 notify_discord: false
+
+history:
+  window_minutes: 1440
+  max_points: 400
+  min_points: 3

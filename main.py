@@ -2,7 +2,7 @@
 from __future__ import annotations
 import os, time, yaml
 from dataclasses import dataclass
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from dotenv import load_dotenv
 
 from utils.logging_setup import setup_logger
@@ -13,6 +13,7 @@ from detectors.fake_bin import detect_fake_bin, FakeBinConfig
 from detectors.spike import detect_spike, SpikeConfig
 from notifier.discord_webhook import send_discord_message
 from storage.state import AlertState
+from storage.price_history import PriceHistory
 
 load_dotenv()
 log = setup_logger()
@@ -31,6 +32,9 @@ class Config:
     futwiz_platform: str
     futwiz_pages: int
     futwiz_delay_between_pages: float
+    history_window_minutes: int
+    history_max_points: int
+    history_min_points: int
 
 def load_config() -> Config:
     path = "config.yaml"
@@ -40,6 +44,7 @@ def load_config() -> Config:
     with open(path, "r", encoding="utf-8") as f:
         y = yaml.safe_load(f)
     futwiz_cfg = y.get("futwiz", {}) or {}
+    history_cfg = y.get("history", {}) or {}
     return Config(
         source=str(y.get("source", "csv")).lower(),
         data_path=y.get("data_path","./data/futbin_export.csv"),
@@ -53,31 +58,73 @@ def load_config() -> Config:
         futwiz_platform=str(futwiz_cfg.get("platform", "ps")),
         futwiz_pages=int(futwiz_cfg.get("pages", 1)),
         futwiz_delay_between_pages=float(futwiz_cfg.get("delay_between_pages", 1.0)),
+        history_window_minutes=max(1, int(history_cfg.get("window_minutes", 60 * 24))),
+        history_max_points=max(10, int(history_cfg.get("max_points", 400))),
+        history_min_points=max(1, int(history_cfg.get("min_points", 3))),
     )
 
 def fmt_coin(n: int) -> str:
     return f"{n:,}".replace(",", ".")
 
+
+def _to_float(value: Any) -> Optional[float]:
+    if value in (None, ""):
+        return None
+    if isinstance(value, str):
+        text = value.strip().replace(" ", "")
+        if not text:
+            return None
+        if "." in text and "," in text:
+            text = text.replace(".", "").replace(",", ".")
+        elif text.count(",") == 1 and "." not in text:
+            text = text.replace(".", "").replace(",", ".")
+        elif text.count(".") > 1 and "," not in text:
+            text = text.replace(".", "")
+        elif text.count(".") == 1 and "," not in text:
+            left, right = text.split(".")
+            if len(right) == 3 and len(left) >= 1:
+                text = left + right
+        text = text.replace(",", "")
+        try:
+            return float(text)
+        except ValueError:
+            return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
 def format_alert(row: Dict[str, Any], info: Dict[str, Any]) -> str:
     badge = info.get("type","ALERT")
     name = row.get("name","?")
     rating = row.get("rating","?")
-    price = int(float(row.get("price",0)))
-    expected = int(info.get("expected", price))
+    price_raw = row.get("price", 0)
+    price_val = _to_float(price_raw) or 0
+    price = int(round(price_val)) if price_val else 0
+    expected_raw = info.get("expected", price)
+    expected_float = _to_float(expected_raw) or price
+    expected = int(round(expected_float)) if expected_float else price
+    history_points = info.get("history_points")
+    history_suffix = (
+        f" | Hist.: {history_points} pts" if isinstance(history_points, int) and history_points > 0 else ""
+    )
     if badge == "UNDERPRICED":
         score = info.get('score')
         score_fmt = score if score is not None else "--"
         return (f"🟢 **UNDERPRICED** — {name} ({rating})\n"
                 f"Preço: **{fmt_coin(price)}** | Esperado: {fmt_coin(expected)} "
-                f"(desconto ~{int(info.get('discount_pct',0)*100)}%, z≈{score_fmt})")
+                f"(desconto ~{int(info.get('discount_pct',0)*100)}%, z≈{score_fmt})"
+                f"{history_suffix}")
     if badge == "FAKE_BIN_SUSPECT":
         return (f"🟠 **FAKE BIN?** — {name} ({rating})\n"
                 f"Preço: **{fmt_coin(price)}** | Média: {fmt_coin(expected)} "
-                f"(queda ~{int(info.get('drop_pct',0)*100)}%)")
+                f"(queda ~{int(info.get('drop_pct',0)*100)}%)"
+                f"{history_suffix}")
     if badge == "SPIKE":
         return (f"🔵 **SPIKE** — {name} ({rating})\n"
                 f"Preço: **{fmt_coin(price)}** | Média: {fmt_coin(expected)} "
-                f"(alta ~{int(info.get('spike_pct',0)*100)}%)")
+                f"(alta ~{int(info.get('spike_pct',0)*100)}%)"
+                f"{history_suffix}")
     return f"🔔 {badge} — {name} ({rating}) @ {fmt_coin(price)}"
 
 def maybe_notify(cfg: Config, content: str):
@@ -93,7 +140,17 @@ def maybe_notify(cfg: Config, content: str):
 def run():
     cfg = load_config()
     state = AlertState()
+    history = PriceHistory(
+        window_minutes=cfg.history_window_minutes,
+        max_points=cfg.history_max_points,
+    )
     log.info("Iniciando FC26 Market Watch")
+    log.info(
+        "Histórico interno: janela=%s min | max=%s pts | mínimo p/ usar=%s",
+        cfg.history_window_minutes,
+        cfg.history_max_points,
+        cfg.history_min_points,
+    )
     if cfg.source == "csv":
         log.info(
             f"Lendo CSV: {cfg.data_path} | intervalo: {cfg.poll_interval_secs}s"
@@ -151,6 +208,18 @@ def run():
 
             for row in rows:
                 pid = str(row.get("player_id") or row.get("name"))
+                price_value = _to_float(row.get("price"))
+                if price_value is None:
+                    continue
+
+                history.add(pid, price_value, row.get("updated_at"))
+                stats = history.get_stats(pid)
+                if stats and stats.count >= cfg.history_min_points:
+                    if row.get("avg_price_24h") in (None, "", 0):
+                        row["avg_price_24h"] = stats.average
+                    if row.get("std_24h") in (None, ""):
+                        row["std_24h"] = stats.stddev
+
                 # Detectores
                 for det_name, info in (
                     ("UNDERPRICED", detect_underpriced(row, ucfg)),
@@ -161,6 +230,8 @@ def run():
                         continue
                     if not state.can_alert(pid, det_name, cooldown):
                         continue
+                    if stats and stats.count:
+                        info.setdefault("history_points", stats.count)
                     content = format_alert(row, info)
                     maybe_notify(cfg, content)
 
