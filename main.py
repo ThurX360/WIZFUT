@@ -1,12 +1,13 @@
 
 from __future__ import annotations
-import os, time, yaml, math
+import os, time, yaml
 from dataclasses import dataclass
 from typing import Dict, Any
 from dotenv import load_dotenv
 
 from utils.logging_setup import setup_logger
 from sources.futbin_csv import read_rows
+from sources.futwiz_scraper import FutwizScraper, FutwizScraperConfig
 from detectors.underpriced import detect_underpriced, UnderpricedConfig
 from detectors.fake_bin import detect_fake_bin, FakeBinConfig
 from detectors.spike import detect_spike, SpikeConfig
@@ -18,6 +19,7 @@ log = setup_logger()
 
 @dataclass
 class Config:
+    source: str
     data_path: str
     poll_interval_secs: int
     min_discount: float
@@ -26,6 +28,9 @@ class Config:
     spike_pct: float
     cooldown_minutes: int
     notify_discord: bool
+    futwiz_platform: str
+    futwiz_pages: int
+    futwiz_delay_between_pages: float
 
 def load_config() -> Config:
     path = "config.yaml"
@@ -34,7 +39,9 @@ def load_config() -> Config:
         path = "config.example.yaml"
     with open(path, "r", encoding="utf-8") as f:
         y = yaml.safe_load(f)
+    futwiz_cfg = y.get("futwiz", {}) or {}
     return Config(
+        source=str(y.get("source", "csv")).lower(),
         data_path=y.get("data_path","./data/futbin_export.csv"),
         poll_interval_secs=int(y.get("poll_interval_secs", 20)),
         min_discount=float(y.get("min_discount", 0.12)),
@@ -43,6 +50,9 @@ def load_config() -> Config:
         spike_pct=float(y.get("spike_pct", 0.20)),
         cooldown_minutes=int(y.get("cooldown_minutes", 15)),
         notify_discord=bool(y.get("notify_discord", True)),
+        futwiz_platform=str(futwiz_cfg.get("platform", "ps")),
+        futwiz_pages=int(futwiz_cfg.get("pages", 1)),
+        futwiz_delay_between_pages=float(futwiz_cfg.get("delay_between_pages", 1.0)),
     )
 
 def fmt_coin(n: int) -> str:
@@ -55,9 +65,11 @@ def format_alert(row: Dict[str, Any], info: Dict[str, Any]) -> str:
     price = int(float(row.get("price",0)))
     expected = int(info.get("expected", price))
     if badge == "UNDERPRICED":
+        score = info.get('score')
+        score_fmt = score if score is not None else "--"
         return (f"🟢 **UNDERPRICED** — {name} ({rating})\n"
                 f"Preço: **{fmt_coin(price)}** | Esperado: {fmt_coin(expected)} "
-                f"(desconto ~{int(info.get('discount_pct',0)*100)}%, z≈{info.get('score',0)})")
+                f"(desconto ~{int(info.get('discount_pct',0)*100)}%, z≈{score_fmt})")
     if badge == "FAKE_BIN_SUSPECT":
         return (f"🟠 **FAKE BIN?** — {name} ({rating})\n"
                 f"Preço: **{fmt_coin(price)}** | Média: {fmt_coin(expected)} "
@@ -82,29 +94,60 @@ def run():
     cfg = load_config()
     state = AlertState()
     log.info("Iniciando FC26 Market Watch")
-    log.info(f"Lendo: {cfg.data_path} | intervalo: {cfg.poll_interval_secs}s")
+    if cfg.source == "csv":
+        log.info(
+            f"Lendo CSV: {cfg.data_path} | intervalo: {cfg.poll_interval_secs}s"
+        )
+    elif cfg.source == "futwiz":
+        log.info(
+            "Scraping Futwiz | plataforma: %s | páginas: %s",
+            cfg.futwiz_platform,
+            cfg.futwiz_pages,
+        )
+        log.info("Intervalo de pooling: %ss", cfg.poll_interval_secs)
+    else:
+        raise ValueError(f"Fonte desconhecida: {cfg.source}")
     ucfg = UnderpricedConfig(cfg.min_discount, cfg.zscore_min)
     fcfg = FakeBinConfig(cfg.fake_drop_pct)
     scfg = SpikeConfig(cfg.spike_pct)
     cooldown = cfg.cooldown_minutes * 60
 
     last_mtime = 0.0
+    scraper: FutwizScraper | None = None
+    scraper_cfg: FutwizScraperConfig | None = None
+    if cfg.source == "futwiz":
+        scraper = FutwizScraper()
+        scraper_cfg = FutwizScraperConfig(
+            platform=cfg.futwiz_platform,
+            pages=cfg.futwiz_pages,
+            delay_between_pages=cfg.futwiz_delay_between_pages,
+        )
 
     while True:
         try:
-            if not os.path.exists(cfg.data_path):
-                log.warning(f"Arquivo não encontrado: {cfg.data_path}")
-                time.sleep(cfg.poll_interval_secs)
-                continue
+            if cfg.source == "csv":
+                if not os.path.exists(cfg.data_path):
+                    log.warning(f"Arquivo não encontrado: {cfg.data_path}")
+                    time.sleep(cfg.poll_interval_secs)
+                    continue
 
-            mtime = os.path.getmtime(cfg.data_path)
-            if mtime <= last_mtime:
-                time.sleep(cfg.poll_interval_secs)
-                continue
-            last_mtime = mtime
+                mtime = os.path.getmtime(cfg.data_path)
+                if mtime <= last_mtime:
+                    time.sleep(cfg.poll_interval_secs)
+                    continue
+                last_mtime = mtime
 
-            rows = read_rows(cfg.data_path)
-            log.info(f"{len(rows)} linhas lidas. Rodando detectores...")
+                rows = read_rows(cfg.data_path)
+                log.info(f"{len(rows)} linhas lidas. Rodando detectores...")
+            else:
+                rows = scraper.fetch_market(scraper_cfg) if scraper and scraper_cfg else []
+                if not rows:
+                    log.warning("Scraper Futwiz não retornou dados")
+                    time.sleep(cfg.poll_interval_secs)
+                    continue
+                log.info(
+                    f"{len(rows)} itens recebidos da Futwiz. Rodando detectores..."
+                )
 
             for row in rows:
                 pid = str(row.get("player_id") or row.get("name"))

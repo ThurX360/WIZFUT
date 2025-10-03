@@ -1,5 +1,12 @@
 
+source: csv
 data_path: "./sample_data/futbin_export.csv"
+
+futwiz:
+  platform: ps
+  pages: 1
+  delay_between_pages: 1.0
+
 poll_interval_secs: 5
 min_discount: 0.12
 zscore_min: 1.8

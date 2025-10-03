@@ -1,6 +1,13 @@
-# Caminhos
-data_path: "./data/futbin_export.csv"        # CSV atualizado pelo seu feeder (ou use sample_data para testes)
-poll_interval_secs: 20                       # Freq. que verificamos o arquivo
+# Fonte dos dados
+source: csv                                  # csv | futwiz
+data_path: "./data/futbin_export.csv"        # Usado quando source=csv
+
+futwiz:                                      # Usado quando source=futwiz
+  platform: ps                               # ps | xbox | pc
+  pages: 1                                   # número de páginas do grid para scrapear
+  delay_between_pages: 1.0                   # pausa entre requisições em segundos
+
+poll_interval_secs: 20                       # Freq. que verificamos/refresh
 
 # Limiar dos detectores
 min_discount: 0.12       # 12% abaixo da média já é interessante
