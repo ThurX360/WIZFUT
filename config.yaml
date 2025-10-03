@@ -1,0 +1,9 @@
+
+data_path: "./sample_data/futbin_export.csv"
+poll_interval_secs: 5
+min_discount: 0.12
+zscore_min: 1.8
+fake_drop_pct: 0.40
+spike_pct: 0.20
+cooldown_minutes: 0
+notify_discord: false

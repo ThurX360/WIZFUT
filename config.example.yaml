@@ -1,0 +1,13 @@
+# Caminhos
+data_path: "./data/futbin_export.csv"        # CSV atualizado pelo seu feeder (ou use sample_data para testes)
+poll_interval_secs: 20                       # Freq. que verificamos o arquivo
+
+# Limiar dos detectores
+min_discount: 0.12       # 12% abaixo da média já é interessante
+zscore_min: 1.8          # Z-score <= -1.8
+fake_drop_pct: 0.40      # Queda >= 40% vira suspeita de fake BIN
+spike_pct: 0.20          # Alta >= 20% sinaliza spike
+
+# Alertas
+cooldown_minutes: 15     # Não repetir o mesmo alerta do mesmo jogador antes desse tempo
+notify_discord: true
