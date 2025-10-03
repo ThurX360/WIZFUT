@@ -1,8 +1,5 @@
-# Fonte dos dados
-source: csv                                  # csv | futwiz
-data_path: "./data/futbin_export.csv"        # Usado quando source=csv
-
-futwiz:                                      # Usado quando source=futwiz
+# Fonte dos dados (apenas Futwiz scraping)
+futwiz:
   platform: ps                               # ps | xbox | pc
   pages: 1                                   # número de páginas do grid para scrapear
   delay_between_pages: 1.0                   # pausa entre requisições em segundos
@@ -19,7 +16,7 @@ spike_pct: 0.20          # Alta >= 20% sinaliza spike
 cooldown_minutes: 15     # Não repetir o mesmo alerta do mesmo jogador antes desse tempo
 notify_discord: true
 
-# Histórico interno (preenche média/desvio quando faltarem no CSV/scraper)
+# Histórico interno (preenche média/desvio quando faltarem no scraper)
 history:
   window_minutes: 1440   # janela de análise em minutos (padrão 24h)
   max_points: 400        # máximo de pontos por jogador mantidos em memória

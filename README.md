@@ -1,10 +1,9 @@
 
-# FC26 Market Watch — Bot de Oportunidades (Futbin/Futwiz feeder)
+# FC26 Market Watch — Bot de Oportunidades (Scraper Futwiz)
 
-> **Ideia:** O bot roda offline e não interage com sua conta EA.
-> Por padrão ele **lê arquivos CSV/JSON exportados** por um feeder (ex.: `futbin_crawler`),
-> mas agora também há um modo **opcional de scraping direto no Futwiz** (`source: futwiz`).
-> Em ambos os casos ele analisa o mercado para detectar:
+> **Ideia:** O bot roda offline, consulta o grid do Futwiz periodicamente e envia alertas com oportunidades.
+> Ele **não interage com sua conta EA** nem automatiza ações dentro do jogo.
+> A cada rodada ele coleta preços, calcula métricas históricas e detecta:
 > - **Possível snipe/underpriced** (preço menor que a média histórica)
 > - **Possível fake BIN** (queda brusca sem confirmação de volume)
 > - **Spike de preço** (movimento forte que pode indicar flip)
@@ -20,63 +19,49 @@ Ele roda em loop 24/7 (enquanto o processo estiver ativo) e **envia alertas para
 
 2) **Crie um Webhook no Discord** (Server → Edit Channel → Integrations → Webhooks) e copie a URL.
 
-3) **Escolha a fonte de dados**
-   - **Feeder externo (padrão)**: mantenha `source: csv` no `config.yaml`.
-     - Configure o crawler para **salvar um CSV** atualizado com campos semelhantes a:
-       - `player_id, name, rating, league, position, price, avg_price_24h, std_24h, updated_at`
-     - Coloque o arquivo em `./data/futbin_export.csv` (você pode mudar isso no `config.yaml`).
-     - Se ainda não tiver feeder, teste com nosso arquivo de exemplo em `sample_data/futbin_export.csv`.
-   - **Scraping Futwiz (opcional/experimental)**: defina `source: futwiz` e ajuste o bloco `futwiz` (plataforma, páginas, delay).
-
-4) **Configuração**
-   - Copie `config.example.yaml` para `config.yaml` e ajuste caminhos/limiares.
+3) **Configure o bot**
+   - Copie `config.example.yaml` para `config.yaml`.
+   - Ajuste o bloco `futwiz` (plataforma, páginas e delay entre requisições).
+   - Defina os limiares dos detectores se quiser personalizar (`min_discount`, `fake_drop_pct`, etc.).
    - Copie `.env.example` para `.env` e cole sua `DISCORD_WEBHOOK_URL`.
    - Ajuste (se quiser) o bloco `history` para definir janela máxima, pontos e mínimo de amostras.
 
-5) **Instalar dependências**
+4) **Instale as dependências**
 ```bash
 pip install -r requirements.txt
 ```
 
-6) **Rodar**
+5) **Execute o bot**
 ```bash
 python main.py
 ```
-O bot vai assistir o arquivo (CSV) ou realizar scraping periódico do Futwiz, dependendo do `source`, e enviar alertas quando detectar oportunidades.
+O bot vai realizar scraping periódico do Futwiz e enviar alertas quando detectar oportunidades.
 
 ---
 
-## Esquema do CSV esperado
-Mínimo recomendado de colunas (header):
-```
-player_id,name,rating,league,position,price,avg_price_24h,std_24h,updated_at
-```
-- `price` = BIN mínimo atual (inteiro em coins)
-- `avg_price_24h` e `std_24h` = média e desvio das últimas 24h (se seu feeder não tiver, o bot constrói histórico e usa rolling)
-- `updated_at` = ISO8601 (ex.: `2025-10-03T16:00:00Z`)
+## Configurações principais
 
-> Se seu feeder gera **outros nomes de colunas**, atualize o mapeamento em `sources/futbin_csv.py`.
+### Bloco `futwiz`
+- `platform`: `ps` | `xbox` | `pc`
+- `pages`: quantas páginas do grid do Futwiz serão varridas por rodada
+- `delay_between_pages`: pausa (segundos) entre cada requisição para evitar bloqueios
 
----
-
-## Regras simples (padrão)
-- **Underpriced/Snipe:** `price <= avg_24h * (1 - MIN_DISCOUNT)` **e** `zscore <= -ZSCORE_MIN`  
-- **Fake BIN (suspeita):** queda > `FAKE_DROP_PCT` **e** `std_24h` muito baixo **ou** histórico curto; não confirma volume
-- **Spike:** `price >= avg_24h * (1 + SPIKE_PCT)`
-
-Você pode editar limiares no `config.yaml`.
+### Detectores
+- **Underpriced/Snipe:** `price <= avg_24h * (1 - min_discount)` **e** `zscore <= -zscore_min`
+- **Fake BIN (suspeita):** queda > `fake_drop_pct` **e** `std_24h` muito baixo **ou** histórico curto; não confirma volume
+- **Spike:** `price >= avg_24h * (1 + spike_pct)`
 
 ### Histórico inteligente
-- Mantemos um **buffer circular em memória** com até 400 amostras recentes por jogador (configurável).
-- Quando `avg_price_24h` ou `std_24h` não vêm do feeder/scraper, eles são recalculados antes da análise.
+- Mantemos um **buffer circular em memória** com até `history.max_points` amostras recentes por jogador.
+- Quando `avg_price_24h` ou `std_24h` não vêm do Futwiz, eles são recalculados antes da análise.
 - Os alertas mostram quantas amostras sustentaram o cálculo (`Hist.: X pts`) para facilitar a confiança.
 
 ---
 
 ## Atenção (ToS / Risco)
-- Respeite os **Termos de Uso** dos sites (Futbin/Futwiz) e do EA FC.
+- Respeite os **Termos de Uso** do Futwiz e do EA FC.
 - Este projeto é **apenas para análise**. Não automatiza ações dentro do jogo.
-- Scraping agressivo pode ser bloqueado. Use o modo `source: futwiz` com poucos requests (ajuste `pages`/`delay_between_pages`) ou mantenha o **feeder oficial** (como seu `futbin_crawler`).
+- Scraping agressivo pode ser bloqueado. Ajuste `pages`/`delay_between_pages` e o `poll_interval_secs` com cautela.
 
 ---
 
@@ -88,7 +73,6 @@ fc26_market_bot/
   config.example.yaml
   .env.example
   sources/
-    futbin_csv.py
     futwiz_scraper.py
   detectors/
     underpriced.py
@@ -100,15 +84,13 @@ fc26_market_bot/
     state.py
   utils/
     logging_setup.py
-  sample_data/
-    futbin_export.csv
 ```
 
 ---
 
 ## Dúvidas comuns
-- **“Quero que rode 24h”:** execute numa VPS ou PC ligado (use `tmux`/`screen`/`pm2`/Docker).  
-- **“Posso ligar direto no Futwiz/Futbin?”**: com `source: futwiz` o bot busca preços direto na Futwiz (com cautela). Para Futbin continue usando um feeder externo.
-- **“Quero Excel/Google Sheets”:** basta exportar do feeder para CSV e apontar o `data_path` para esse arquivo.
+- **“Quero que rode 24h”:** execute numa VPS ou PC ligado (use `tmux`/`screen`/`pm2`/Docker).
+- **“Posso ligar direto no Futwiz?”**: sim, o bot já faz scraping direto no Futwiz (com cautela).
+- **“Posso ligar no Futbin/planilhas?”**: o modo CSV foi removido; concentre-se no scraping Futwiz ou adapte sua própria solução externa.
 
 Bons trades! ⚽📈
