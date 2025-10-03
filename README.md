@@ -1,8 +1,10 @@
 
 # FC26 Market Watch — Bot de Oportunidades (Futbin/Futwiz feeder)
 
-> **Ideia:** Este bot **NÃO faz scraping** nem loga na sua conta EA.  
-> Ele **lê arquivos CSV/JSON exportados** por um *feeder* (por exemplo, o `futbin_crawler`) e analisa o mercado para detectar:
+> **Ideia:** O bot roda offline e não interage com sua conta EA.
+> Por padrão ele **lê arquivos CSV/JSON exportados** por um feeder (ex.: `futbin_crawler`),
+> mas agora também há um modo **opcional de scraping direto no Futwiz** (`source: futwiz`).
+> Em ambos os casos ele analisa o mercado para detectar:
 > - **Possível snipe/underpriced** (preço menor que a média histórica)
 > - **Possível fake BIN** (queda brusca sem confirmação de volume)
 > - **Spike de preço** (movimento forte que pode indicar flip)
@@ -17,11 +19,13 @@ Ele roda em loop 24/7 (enquanto o processo estiver ativo) e **envia alertas para
 
 2) **Crie um Webhook no Discord** (Server → Edit Channel → Integrations → Webhooks) e copie a URL.
 
-3) **Baixe os dados do mercado** com um feeder (recomendado: seu `futbin_crawler`).  
-   - Configure o crawler para **salvar um CSV** atualizado com campos semelhantes a:
-     - `player_id, name, rating, league, position, price, avg_price_24h, std_24h, updated_at`
-   - Coloque o arquivo em `./data/futbin_export.csv` (você pode mudar isso no `config.yaml`).  
-   - Se ainda não tiver feeder, teste com nosso arquivo de exemplo em `sample_data/futbin_export.csv`.
+3) **Escolha a fonte de dados**
+   - **Feeder externo (padrão)**: mantenha `source: csv` no `config.yaml`.
+     - Configure o crawler para **salvar um CSV** atualizado com campos semelhantes a:
+       - `player_id, name, rating, league, position, price, avg_price_24h, std_24h, updated_at`
+     - Coloque o arquivo em `./data/futbin_export.csv` (você pode mudar isso no `config.yaml`).
+     - Se ainda não tiver feeder, teste com nosso arquivo de exemplo em `sample_data/futbin_export.csv`.
+   - **Scraping Futwiz (opcional/experimental)**: defina `source: futwiz` e ajuste o bloco `futwiz` (plataforma, páginas, delay).
 
 4) **Configuração**
    - Copie `config.example.yaml` para `config.yaml` e ajuste caminhos/limiares.
@@ -36,7 +40,7 @@ pip install -r requirements.txt
 ```bash
 python main.py
 ```
-O bot vai assistir o arquivo (CSV) e enviar alertas quando detectar oportunidades.
+O bot vai assistir o arquivo (CSV) ou realizar scraping periódico do Futwiz, dependendo do `source`, e enviar alertas quando detectar oportunidades.
 
 ---
 
@@ -63,9 +67,9 @@ Você pode editar limiares no `config.yaml`.
 ---
 
 ## Atenção (ToS / Risco)
-- Respeite os **Termos de Uso** dos sites (Futbin/Futwiz) e do EA FC.  
-- Este projeto é **apenas para análise**. Não automatiza ações dentro do jogo.  
-- Scraping agressivo pode ser bloqueado. Use o **feeder oficial** (como seu `futbin_crawler`) com delays.
+- Respeite os **Termos de Uso** dos sites (Futbin/Futwiz) e do EA FC.
+- Este projeto é **apenas para análise**. Não automatiza ações dentro do jogo.
+- Scraping agressivo pode ser bloqueado. Use o modo `source: futwiz` com poucos requests (ajuste `pages`/`delay_between_pages`) ou mantenha o **feeder oficial** (como seu `futbin_crawler`).
 
 ---
 
@@ -78,6 +82,7 @@ fc26_market_bot/
   .env.example
   sources/
     futbin_csv.py
+    futwiz_scraper.py
   detectors/
     underpriced.py
     fake_bin.py
@@ -96,7 +101,7 @@ fc26_market_bot/
 
 ## Dúvidas comuns
 - **“Quero que rode 24h”:** execute numa VPS ou PC ligado (use `tmux`/`screen`/`pm2`/Docker).  
-- **“Posso ligar direto no Futwiz/Futbin?”**: tecnicamente, sim via scraping, mas pode quebrar e infringir ToS. Use feeder externo.  
+- **“Posso ligar direto no Futwiz/Futbin?”**: com `source: futwiz` o bot busca preços direto na Futwiz (com cautela). Para Futbin continue usando um feeder externo.
 - **“Quero Excel/Google Sheets”:** basta exportar do feeder para CSV e apontar o `data_path` para esse arquivo.
 
 Bons trades! ⚽📈
