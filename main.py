@@ -38,15 +38,40 @@ class Config:
     history_max_points: int
     history_min_points: int
 
+def _as_bool(value: Any, default: bool = False) -> bool:
+    """Return ``value`` coerced to ``bool`` respecting string booleans."""
+
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _ensure_mapping(value: Any) -> Dict[str, Any]:
+    """Return ``value`` when it is a mapping, otherwise an empty dict."""
+
+    if isinstance(value, dict):
+        return value
+    return {}
+
+
 def load_config() -> Config:
     path = "config.yaml"
     if not os.path.exists(path):
         log.warning("config.yaml não encontrado, usando config.example.yaml")
         path = "config.example.yaml"
     with open(path, "r", encoding="utf-8") as f:
-        y = yaml.safe_load(f)
-    futwiz_cfg = y.get("futwiz", {}) or {}
-    history_cfg = y.get("history", {}) or {}
+        y = yaml.safe_load(f) or {}
+    futwiz_cfg = _ensure_mapping(y.get("futwiz"))
+    history_cfg = _ensure_mapping(y.get("history"))
     return Config(
         poll_interval_secs=int(y.get("poll_interval_secs", 20)),
         min_discount=float(y.get("min_discount", 0.12)),
@@ -54,7 +79,7 @@ def load_config() -> Config:
         fake_drop_pct=float(y.get("fake_drop_pct", 0.40)),
         spike_pct=float(y.get("spike_pct", 0.20)),
         cooldown_minutes=int(y.get("cooldown_minutes", 15)),
-        notify_discord=bool(y.get("notify_discord", True)),
+        notify_discord=_as_bool(y.get("notify_discord", True), True),
         futwiz_platform=str(futwiz_cfg.get("platform", "ps")),
         futwiz_pages=int(futwiz_cfg.get("pages", 1)),
         futwiz_delay_between_pages=float(futwiz_cfg.get("delay_between_pages", 1.0)),
