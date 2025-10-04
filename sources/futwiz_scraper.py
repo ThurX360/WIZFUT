@@ -22,7 +22,7 @@ _USER_AGENT = (
     "Chrome/122.0 Safari/537.36"
 )
 
-_PRICE_RE = re.compile(r"([0-9]+(?:[.,][0-9]+)?)([kmbKMB]?)")
+_PRICE_RE = re.compile(r"([0-9]+(?:[.,][0-9]+)*)([kmbKMB]?)")
 _RELATIVE_TIME_RE = re.compile(
     r"(?P<value>\d+)\s*(?P<unit>second|minute|hour|day|week)s?\s*ago",
     re.IGNORECASE,
@@ -58,18 +58,51 @@ class FutwizScraper:
         text = (text or "").strip()
         if not text or text in {"-", "?"}:
             return None
-        match = _PRICE_RE.search(text.replace(" ", ""))
+
+        compact = text.replace(" ", "")
+        match = _PRICE_RE.search(compact)
         if not match:
             return None
-        number = float(match.group(1).replace(",", ""))
+
+        number_text = match.group(1)
         suffix = match.group(2).lower()
+
+        if "." in number_text and "," in number_text:
+            if number_text.rfind(".") > number_text.rfind(","):
+                thousands_sep, decimal_sep = ",", "."
+            else:
+                thousands_sep, decimal_sep = ".", ","
+            normalized = number_text.replace(thousands_sep, "").replace(decimal_sep, ".")
+        elif number_text.count(",") > 1 and "." not in number_text:
+            normalized = number_text.replace(",", "")
+        elif number_text.count(".") > 1 and "," not in number_text:
+            normalized = number_text.replace(".", "")
+        else:
+            normalized = number_text
+            if "," in normalized and "." not in normalized:
+                frac_len = len(normalized) - normalized.rfind(",") - 1
+                if frac_len in (1, 2):
+                    normalized = normalized.replace(",", ".")
+                else:
+                    normalized = normalized.replace(",", "")
+            elif "." in normalized and "," not in normalized:
+                frac_len = len(normalized) - normalized.rfind(".") - 1
+                if frac_len not in (1, 2):
+                    normalized = normalized.replace(".", "")
+
+        try:
+            number = float(normalized)
+        except ValueError:
+            return None
+
         if suffix == "k":
             number *= 1_000
         elif suffix == "m":
             number *= 1_000_000
         elif suffix == "b":
             number *= 1_000_000_000
-        return int(number)
+
+        return int(round(number))
 
     def _parse_row(self, tr: Tag, platform: str) -> Optional[Dict[str, object]]:
         player_id = tr.get("data-playerid") or tr.get("data-id")
